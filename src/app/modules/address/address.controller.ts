@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { AddressService } from './address.service';
 
@@ -31,7 +32,7 @@ const getAddresses = catchAsync(async (req, res) => {
 const updateAddress = catchAsync(async (req, res) => {
   const result = await AddressService.updateAddressToDB(
     req.user.id,
-    req.params.id,
+    resolveParam(req.params.id),
     req.body
   );
 
@@ -44,7 +45,10 @@ const updateAddress = catchAsync(async (req, res) => {
 });
 
 const deleteAddress = catchAsync(async (req, res) => {
-  await AddressService.deleteAddressFromDB(req.user.id, req.params.id);
+  await AddressService.deleteAddressFromDB(
+    req.user.id,
+    resolveParam(req.params.id)
+  );
 
   sendResponse(res, {
     success: true,

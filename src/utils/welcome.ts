@@ -1,77 +1,34 @@
-export const welcome = () => {
-  const date = new Date(Date.now());
-  const hours = date.getHours();
-  let greeting = "";
+import config from '../config';
 
-  // Time-based greeting
-  if (hours < 12) {
-    greeting = "Good morning! 🌞 Let’s get the day started!";
-  } else if (hours < 18) {
-    greeting = "Good afternoon! 🌤️ Keep the momentum going!";
-  } else {
-    greeting = "Good evening! 🌙 Hope you had a fantastic day!";
-  }
+export const welcome = () => {
+  const now = new Date();
+  const isProduction = config.node_env === 'production';
 
   return `
-      <div style="text-align:center; font-family: 'Verdana', sans-serif; color:#4CAF50; padding: 50px 20px; border-radius: 10px; box-shadow: 0 0 20px rgba(0, 0, 0, 0.1); max-width: 100%; margin: 0 auto; animation: fadeIn 2s;">
-        <h1 style="font-size: 48px; color: #FF6347; animation: scaleUp 1s ease-in-out;">Beep-beep! The server is alive and kicking 🚀</h1>
-        <p style="font-size: 24px; color: #2F4F4F; animation: slideIn 1.5s ease-in-out;">${greeting}</p>
-        <p style="font-size: 20px; color: #3B3B3B;">The current date and time is: <strong style="color: #FF6347;">${date}</strong></p>
-        <p style="font-size: 18px; color: #555;">This server is a highly caffeinated web machine ready to serve your requests with super speed!</p>
-        <p style="font-size: 22px; color: #2E8B57;">We're up and running with style! 😎</p>
-        <p><em style="font-size: 16px;">If you're seeing this message, congratulations – you're looking at a live server! 🎉</em></p>
-        <p style="font-size: 16px; color: #888;">Don’t forget to stay awesome! 🌟</p>
-  
-        <div style="margin-top: 20px; animation: fadeIn 2s;">
-          <h3 style="font-size: 24px; color: #32CD32;">Just a few things:</h3>
-          <ul style="font-size: 18px; list-style-type: none; padding: 0; color: #4682B4;">
-            <li>✅ Server is alive</li>
-            <li>✅ Date & time are correct</li>
-            <li>✅ Feeling awesome!</li>
-          </ul>
+    <div style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:#F6F8F7; font-family:'Segoe UI', Roboto, Arial, sans-serif; color:#17262A; padding:40px 20px;">
+      <div style="text-align:center; max-width:480px; width:100%;">
+        <div style="display:inline-flex; align-items:center; gap:10px; margin-bottom:24px;">
+          <span style="width:10px; height:10px; border-radius:50%; background:#3F9C6B; display:inline-block;"></span>
+          <span style="font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#3F9C6B;">Server is live</span>
         </div>
-        <div style="margin-top: 40px; animation: fadeIn 3s;">
-          <p style="font-size: 18px; color: #8B0000;">Wait... you’re still here? 🤔 Well, go ahead and try some cool routes! 😄</p>
-        </div>
-        <div style="margin-top: 40px; animation: fadeIn 4s;">
-          <h2 style="font-size: 28px; color: #FFD700;">Let’s create some magic together! ✨</h2>
-        </div>
-  
-        <div style="margin-top: 20px; animation: fadeIn 5s;">
-          <h3 style="font-size: 24px; color: #FF1493;">🧑‍💻 Developer Tip:</h3>
-          <p style="font-size: 18px; color: #800080;">Every time you refresh this page, the server gets a little more powerful! 💪🔥</p>
+        <h1 style="font-size:32px; font-weight:700; margin:0 0 8px; color:#2F7E93;">Zyara Backend</h1>
+        <p style="font-size:15px; color:#55686C; margin:0 0 32px;">REST API powering the Zyara app — groceries, food, flowers, gift cards, and everything in between.</p>
+
+        <div style="background:#FFFFFF; border:1px solid #DDE6E5; border-radius:12px; padding:20px 24px; text-align:left; font-size:14px; line-height:1.9;">
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#55686C;">Environment</span>
+            <strong>${isProduction ? 'Production' : 'Development'}</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#55686C;">Base path</span>
+            <strong>/api/v1</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#55686C;">Server time</span>
+            <strong>${now.toISOString()}</strong>
+          </div>
         </div>
       </div>
-  
-      <style>
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-  
-        @keyframes scaleUp {
-          from {
-            transform: scale(0.8);
-          }
-          to {
-            transform: scale(1);
-          }
-        }
-  
-        @keyframes slideIn {
-          from {
-            transform: translateX(-50px);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
-      </style>
-    `;
+    </div>
+  `;
 };

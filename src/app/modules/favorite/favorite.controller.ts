@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { FavoriteService } from './favorite.service';
 
@@ -18,7 +19,10 @@ const addFavorite = catchAsync(async (req, res) => {
 });
 
 const removeFavorite = catchAsync(async (req, res) => {
-  await FavoriteService.removeFavoriteFromDB(req.user.id, req.params.storeId);
+  await FavoriteService.removeFavoriteFromDB(
+    req.user.id,
+    resolveParam(req.params.storeId)
+  );
 
   sendResponse(res, {
     success: true,

@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { ProductService } from './product.service';
 
@@ -16,7 +17,9 @@ const getProducts = catchAsync(async (req, res) => {
 });
 
 const getProduct = catchAsync(async (req, res) => {
-  const result = await ProductService.getProductByIdFromDB(req.params.id);
+  const result = await ProductService.getProductByIdFromDB(
+    resolveParam(req.params.id)
+  );
 
   sendResponse(res, {
     success: true,
@@ -60,7 +63,7 @@ const createOwnProduct = catchAsync(async (req, res) => {
 const updateOwnProduct = catchAsync(async (req, res) => {
   const result = await ProductService.updateOwnProductToDB(
     req.user.id,
-    req.params.id,
+    resolveParam(req.params.id),
     req.body
   );
 
@@ -73,7 +76,10 @@ const updateOwnProduct = catchAsync(async (req, res) => {
 });
 
 const deleteOwnProduct = catchAsync(async (req, res) => {
-  await ProductService.deleteOwnProductFromDB(req.user.id, req.params.id);
+  await ProductService.deleteOwnProductFromDB(
+    req.user.id,
+    resolveParam(req.params.id)
+  );
 
   sendResponse(res, {
     success: true,

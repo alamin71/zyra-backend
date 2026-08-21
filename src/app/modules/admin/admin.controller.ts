@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { Secret } from 'jsonwebtoken';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { AdminService } from './admin.service';
 import { uploadToS3 } from '../../../helpers/s3Helper';
@@ -22,7 +23,7 @@ const createAdmin = catchAsync(async (req: Request, res: Response) => {
 });
 
 const deleteAdmin = catchAsync(async (req: Request, res: Response) => {
-  const payload = req.params.id;
+  const payload = resolveParam(req.params.id);
   const result = await AdminService.deleteAdminFromDB(payload);
 
   sendResponse(res, {

@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { VendorApplicationService } from './vendorApplication.service';
 
@@ -33,7 +34,7 @@ const getVendorApplications = catchAsync(async (req, res) => {
 
 const approveVendorApplication = catchAsync(async (req, res) => {
   const result = await VendorApplicationService.approveVendorApplicationToDB(
-    req.params.id,
+    resolveParam(req.params.id),
     req.user.id,
     req.body
   );
@@ -48,7 +49,7 @@ const approveVendorApplication = catchAsync(async (req, res) => {
 
 const rejectVendorApplication = catchAsync(async (req, res) => {
   const result = await VendorApplicationService.rejectVendorApplicationToDB(
-    req.params.id,
+    resolveParam(req.params.id),
     req.user.id,
     req.body.reviewNote
   );

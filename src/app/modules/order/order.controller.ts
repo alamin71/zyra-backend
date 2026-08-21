@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { OrderService } from './order.service';
 
@@ -32,7 +33,7 @@ const getMyOrders = catchAsync(async (req, res) => {
 const getMyOrder = catchAsync(async (req, res) => {
   const result = await OrderService.getMyOrderByIdFromDB(
     req.user.id,
-    req.params.id
+    resolveParam(req.params.id)
   );
 
   sendResponse(res, {
@@ -46,7 +47,7 @@ const getMyOrder = catchAsync(async (req, res) => {
 const cancelMyOrder = catchAsync(async (req, res) => {
   const result = await OrderService.cancelMyOrderToDB(
     req.user.id,
-    req.params.id,
+    resolveParam(req.params.id),
     req.body
   );
 
@@ -61,7 +62,7 @@ const cancelMyOrder = catchAsync(async (req, res) => {
 const rateMyOrder = catchAsync(async (req, res) => {
   const result = await OrderService.rateMyOrderToDB(
     req.user.id,
-    req.params.id,
+    resolveParam(req.params.id),
     req.body
   );
 
@@ -74,7 +75,10 @@ const rateMyOrder = catchAsync(async (req, res) => {
 });
 
 const reorder = catchAsync(async (req, res) => {
-  const result = await OrderService.reorderToDB(req.user.id, req.params.id);
+  const result = await OrderService.reorderToDB(
+    req.user.id,
+    resolveParam(req.params.id)
+  );
 
   sendResponse(res, {
     success: true,
@@ -104,7 +108,7 @@ const getStoreOrders = catchAsync(async (req, res) => {
 const updateOrderStatus = catchAsync(async (req, res) => {
   const result = await OrderService.updateOrderStatusToDB(
     req.user.id,
-    req.params.id,
+    resolveParam(req.params.id),
     req.body.status
   );
 

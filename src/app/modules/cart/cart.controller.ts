@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { CartService } from './cart.service';
 
@@ -28,7 +29,7 @@ const addItem = catchAsync(async (req, res) => {
 const updateItem = catchAsync(async (req, res) => {
   const result = await CartService.updateItemQuantityInCart(
     req.user.id,
-    req.params.itemId,
+    resolveParam(req.params.itemId),
     req.body.quantity
   );
 
@@ -43,7 +44,7 @@ const updateItem = catchAsync(async (req, res) => {
 const removeItem = catchAsync(async (req, res) => {
   const result = await CartService.removeItemFromCart(
     req.user.id,
-    req.params.itemId
+    resolveParam(req.params.itemId)
   );
 
   sendResponse(res, {

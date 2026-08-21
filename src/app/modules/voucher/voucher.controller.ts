@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { VoucherService } from './voucher.service';
 
@@ -52,7 +53,7 @@ const applyVoucher = catchAsync(async (req, res) => {
 });
 
 const deleteVoucher = catchAsync(async (req, res) => {
-  await VoucherService.deleteVoucherFromDB(req.params.id);
+  await VoucherService.deleteVoucherFromDB(resolveParam(req.params.id));
 
   sendResponse(res, {
     success: true,

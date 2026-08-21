@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { CategoryService } from './category.service';
 
@@ -28,7 +29,7 @@ const getCategories = catchAsync(async (req, res) => {
 
 const updateCategory = catchAsync(async (req, res) => {
   const result = await CategoryService.updateCategoryToDB(
-    req.params.id,
+    resolveParam(req.params.id),
     req.body
   );
 
@@ -41,7 +42,7 @@ const updateCategory = catchAsync(async (req, res) => {
 });
 
 const deleteCategory = catchAsync(async (req, res) => {
-  await CategoryService.deleteCategoryFromDB(req.params.id);
+  await CategoryService.deleteCategoryFromDB(resolveParam(req.params.id));
 
   sendResponse(res, {
     success: true,

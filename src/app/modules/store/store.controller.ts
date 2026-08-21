@@ -1,5 +1,6 @@
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
+import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { StoreService } from './store.service';
 
@@ -27,7 +28,9 @@ const getStores = catchAsync(async (req, res) => {
 });
 
 const getStore = catchAsync(async (req, res) => {
-  const result = await StoreService.getStoreByIdFromDB(req.params.id);
+  const result = await StoreService.getStoreByIdFromDB(
+    resolveParam(req.params.id)
+  );
 
   sendResponse(res, {
     success: true,
@@ -38,7 +41,10 @@ const getStore = catchAsync(async (req, res) => {
 });
 
 const moderateStore = catchAsync(async (req, res) => {
-  const result = await StoreService.moderateStoreToDB(req.params.id, req.body);
+  const result = await StoreService.moderateStoreToDB(
+    resolveParam(req.params.id),
+    req.body
+  );
 
   sendResponse(res, {
     success: true,
