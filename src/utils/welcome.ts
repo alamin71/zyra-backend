@@ -24,7 +24,7 @@ export const welcome = () => {
           <span style="font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#5B9C6D;">Server is live</span>
         </div>
 
-        <h1 style="font-size:26px; font-weight:700; margin:0 0 8px; color:#1F2937;">Backend</h1>
+        <h1 style="font-size:26px; font-weight:700; margin:0 0 8px; color:#1F2937;">Backend Server live</h1>
         <p style="font-size:15px; color:#6B7280; margin:0 0 32px; line-height:1.5;">REST API powering the Zyara app — groceries, food, flowers, gift cards, and everything in between.</p>
 
         <div style="background:#FFFFFF; border:1px solid #ECECEC; border-radius:14px; padding:20px 24px; text-align:left; font-size:14px; line-height:1.9; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 8px 24px -12px rgba(0,0,0,.08); margin-bottom:24px;">
