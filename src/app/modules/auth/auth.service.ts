@@ -57,8 +57,11 @@ const dispatchOtp = async (userId: string, phone: string): Promise<string> => {
   return otp;
 };
 
+// Twilio isn't configured yet, so the OTP rides along in the API response
+// for testing. Once real Twilio credentials are set, isTwilioConfigured
+// flips to true and this stops automatically — no manual removal needed.
 const otpForResponse = (otp: string) =>
-  config.node_env !== 'production' ? otp : undefined;
+  smsHelper.isTwilioConfigured ? undefined : otp;
 
 // signup — creates (or resumes) an unverified CUSTOMER and sends an OTP
 const signupUserToDB = async (payload: {

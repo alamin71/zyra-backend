@@ -32,4 +32,5 @@ const sendOTP = async (phone: string, otp: string): Promise<void> => {
 
 export const smsHelper = {
   sendOTP,
+  isTwilioConfigured,
 };
