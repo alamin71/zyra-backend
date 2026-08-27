@@ -13,6 +13,7 @@ import { ProductVendorRoutes } from '../app/modules/product/product.vendor.route
 import { SearchRoutes } from '../app/modules/search/search.route';
 import { StoreRoutes } from '../app/modules/store/store.route';
 import { StoreVendorRoutes } from '../app/modules/store/store.vendor.route';
+import { SupportRoutes } from '../app/modules/support/support.route';
 import { UserRouter } from '../app/modules/user/user.route';
 import { VendorApplicationRoutes } from '../app/modules/vendorApplication/vendorApplication.route';
 import { VoucherRoutes } from '../app/modules/voucher/voucher.route';
@@ -74,6 +75,10 @@ const routes = [
   {
     path: '/policy',
     route: PolicyPagePublicRoutes,
+  },
+  {
+    path: '/support',
+    route: SupportRoutes,
   },
   // Vendor panel — every route below is scoped to the calling vendor's own store.
   {
