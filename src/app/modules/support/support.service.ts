@@ -19,7 +19,7 @@ const getHelpTopicsFromDB = async (query: Record<string, unknown>) => {
     HelpTopic.find({ isActive: true }).lean(),
     { sort: 'order', ...query }
   )
-    .search(['title'])
+    .search(['question'])
     .filter()
     .sort()
     .paginate()

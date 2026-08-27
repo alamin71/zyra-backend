@@ -8,12 +8,12 @@ import {
 
 const helpTopicSchema = new Schema<IHelpTopic, HelpTopicModel>(
   {
-    title: {
+    question: {
       type: String,
       required: true,
       trim: true,
     },
-    content: {
+    answer: {
       type: String,
       required: true,
     },

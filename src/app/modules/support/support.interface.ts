@@ -1,8 +1,8 @@
 import { Model, Types } from 'mongoose';
 
 export type IHelpTopic = {
-  title: string;
-  content: string;
+  question: string;
+  answer: string;
   order: number;
   isActive: boolean;
 };

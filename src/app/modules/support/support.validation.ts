@@ -3,8 +3,8 @@ import { checkValidID } from '../../../shared/checkValidID';
 
 const createHelpTopicZodSchema = z.object({
   body: z.object({
-    title: z.string().trim().nonempty({ message: 'Title is required' }),
-    content: z.string().trim().nonempty({ message: 'Content is required' }),
+    question: z.string().trim().nonempty({ message: 'Question is required' }),
+    answer: z.string().trim().nonempty({ message: 'Answer is required' }),
     order: z.number().int().optional(),
   }),
 });
@@ -14,8 +14,8 @@ const updateHelpTopicZodSchema = z.object({
     id: checkValidID('Invalid help topic id'),
   }),
   body: z.object({
-    title: z.string().trim().optional(),
-    content: z.string().trim().optional(),
+    question: z.string().trim().optional(),
+    answer: z.string().trim().optional(),
     order: z.number().int().optional(),
     isActive: z.boolean().optional(),
   }),
