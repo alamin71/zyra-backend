@@ -7,6 +7,7 @@ import { CategoryRoutes } from '../app/modules/category/category.route';
 import { FavoriteRoutes } from '../app/modules/favorite/favorite.route';
 import { OrderRoutes } from '../app/modules/order/order.route';
 import { OrderVendorRoutes } from '../app/modules/order/order.vendor.route';
+import { PolicyPagePublicRoutes } from '../app/modules/admin/policy-page.public.route';
 import { ProductRoutes } from '../app/modules/product/product.route';
 import { ProductVendorRoutes } from '../app/modules/product/product.vendor.route';
 import { SearchRoutes } from '../app/modules/search/search.route';
@@ -69,6 +70,10 @@ const routes = [
   {
     path: '/orders',
     route: OrderRoutes,
+  },
+  {
+    path: '/policy',
+    route: PolicyPagePublicRoutes,
   },
   // Vendor panel — every route below is scoped to the calling vendor's own store.
   {
