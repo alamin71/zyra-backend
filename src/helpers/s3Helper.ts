@@ -1,21 +1,48 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import fs from 'fs';
+import path from 'path';
 import config from '../config';
+import { logger } from '../shared/logger';
+
+const isAwsConfigured =
+  !!config.aws.access_key_id &&
+  !!config.aws.secret_access_key &&
+  !!config.aws.s3_bucket_name;
 
 // S3 Client Configuration
-const s3Client = new S3Client({
-  region: config.aws.region,
-  credentials: {
-    accessKeyId: config.aws.access_key_id as string,
-    secretAccessKey: config.aws.secret_access_key as string,
-  },
-});
+const s3Client = isAwsConfigured
+  ? new S3Client({
+      region: config.aws.region,
+      credentials: {
+        accessKeyId: config.aws.access_key_id as string,
+        secretAccessKey: config.aws.secret_access_key as string,
+      },
+    })
+  : null;
+
+// Client hasn't provided AWS credentials yet — save to local disk (served via
+// express.static("uploads")) so uploads still work for testing. Once real
+// AWS_* env vars are set, isAwsConfigured flips true and this stops being used.
+const saveLocally = (file: Express.Multer.File, folder: string): string => {
+  const fileName = `${Date.now()}-${file.originalname.replace(/\s+/g, '-')}`;
+  const dir = path.join(process.cwd(), 'uploads', folder);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, fileName), file.buffer);
+
+  logger.info(`[DEV UPLOAD] AWS not configured, saved locally: ${folder}/${fileName}`);
+  return `${config.backend_url}/${folder}/${fileName}`;
+};
 
 // Upload file to S3
 export const uploadToS3 = async (
   file: Express.Multer.File,
   folder: string = 'uploads'
 ): Promise<string> => {
+  if (!s3Client) {
+    return saveLocally(file, folder);
+  }
+
   const fileName = `${folder}/${Date.now()}-${file.originalname.replace(
     /\s+/g,
     '-'
