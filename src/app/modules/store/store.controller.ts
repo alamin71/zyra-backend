@@ -1,11 +1,28 @@
 import { StatusCodes } from 'http-status-codes';
+import { uploadToS3 } from '../../../helpers/s3Helper';
 import catchAsync from '../../../shared/catchAsync';
 import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { StoreService } from './store.service';
 
 const createStore = catchAsync(async (req, res) => {
-  const result = await StoreService.createStoreToDB(req.body);
+  const payload = { ...req.body };
+
+  const files = req.files as
+    | { [fieldname: string]: Express.Multer.File[] }
+    | undefined;
+
+  const logoFile = files?.logo?.[0];
+  if (logoFile) {
+    payload.logo = await uploadToS3(logoFile, 'store/logo');
+  }
+
+  const bannerFile = files?.banner?.[0];
+  if (bannerFile) {
+    payload.banner = await uploadToS3(bannerFile, 'store/banner');
+  }
+
+  const result = await StoreService.createStoreToDB(payload);
 
   sendResponse(res, {
     success: true,
