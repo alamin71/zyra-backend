@@ -1,8 +1,26 @@
+import { Request } from 'express';
 import { StatusCodes } from 'http-status-codes';
+import { uploadMultipleToS3 } from '../../../helpers/s3Helper';
 import catchAsync from '../../../shared/catchAsync';
 import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
 import { ProductService } from './product.service';
+
+// Shared by create + update — both accept "images" as multipart file
+// uploads; when files are sent, their uploaded URLs replace payload.images.
+const applyImageUploads = async (
+  req: Request,
+  payload: Record<string, unknown>
+) => {
+  const files = req.files as
+    | { [fieldname: string]: Express.Multer.File[] }
+    | undefined;
+
+  const imageFiles = files?.images;
+  if (imageFiles && imageFiles.length > 0) {
+    payload.images = await uploadMultipleToS3(imageFiles, 'product/images');
+  }
+};
 
 const getProducts = catchAsync(async (req, res) => {
   const { data, meta } = await ProductService.getProductsFromDB(req.query);
@@ -47,9 +65,12 @@ const getOwnProducts = catchAsync(async (req, res) => {
 });
 
 const createOwnProduct = catchAsync(async (req, res) => {
+  const payload = { ...req.body };
+  await applyImageUploads(req, payload);
+
   const result = await ProductService.createOwnProductToDB(
     req.user.id,
-    req.body
+    payload
   );
 
   sendResponse(res, {
@@ -61,10 +82,13 @@ const createOwnProduct = catchAsync(async (req, res) => {
 });
 
 const updateOwnProduct = catchAsync(async (req, res) => {
+  const payload = { ...req.body };
+  await applyImageUploads(req, payload);
+
   const result = await ProductService.updateOwnProductToDB(
     req.user.id,
     resolveParam(req.params.id),
-    req.body
+    payload
   );
 
   sendResponse(res, {
