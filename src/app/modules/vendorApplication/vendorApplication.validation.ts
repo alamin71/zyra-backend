@@ -7,6 +7,9 @@ import {
 } from '../store/store.validation';
 import { GIFT_CARD_CATEGORIES } from '../store/store.interface';
 
+// The "Join Us" form now collects everything upfront — the vendor's login
+// identity (phone/contactName) and store details — so approving needs
+// nothing but the application id; rejecting needs nothing but an optional note.
 const createVendorApplicationZodSchema = z.object({
   body: z.object({
     storeName: z
@@ -18,21 +21,10 @@ const createVendorApplicationZodSchema = z.object({
       .trim()
       .nonempty({ message: 'Business field is required' }),
     email: z.string().trim().email({ message: 'Invalid email address' }),
-  }),
-});
-
-// The "Join Us" form only collects storeName/businessField/email — approving
-// is what actually turns the application into a live VENDOR account + Store,
-// so it needs everything a Store (and the vendor's login identity) requires.
-const approveVendorApplicationZodSchema = z.object({
-  params: z.object({
-    id: checkValidID('Invalid vendor application id'),
-  }),
-  body: z.object({
     contactName: z
       .string()
       .trim()
-      .nonempty({ message: "Vendor's contact name is required" }),
+      .nonempty({ message: "Contact name is required" }),
     phone: z
       .string()
       .trim()
@@ -55,6 +47,12 @@ const approveVendorApplicationZodSchema = z.object({
     supportsDelivery: z.boolean().optional(),
     supportsPickup: z.boolean().optional(),
     acceptsGiftCardCategories: z.array(z.enum(GIFT_CARD_CATEGORIES)).optional(),
+  }),
+});
+
+const approveVendorApplicationZodSchema = z.object({
+  params: z.object({
+    id: checkValidID('Invalid vendor application id'),
   }),
 });
 

@@ -35,8 +35,7 @@ const getVendorApplications = catchAsync(async (req, res) => {
 const approveVendorApplication = catchAsync(async (req, res) => {
   const result = await VendorApplicationService.approveVendorApplicationToDB(
     resolveParam(req.params.id),
-    req.user.id,
-    req.body
+    req.user.id
   );
 
   sendResponse(res, {

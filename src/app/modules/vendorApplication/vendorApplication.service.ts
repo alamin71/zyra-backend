@@ -11,7 +11,7 @@ import { IVendorApplication } from './vendorApplication.interface';
 import { VendorApplication } from './vendorApplication.model';
 
 const createVendorApplicationToDB = async (
-  payload: Pick<IVendorApplication, 'storeName' | 'businessField' | 'email'>
+  payload: Omit<IVendorApplication, 'status' | 'reviewedBy' | 'reviewNote'>
 ) => {
   return VendorApplication.create(payload);
 };
@@ -47,21 +47,15 @@ const getPendingApplication = async (id: string) => {
 };
 
 // Approving turns the application into a live VENDOR account (found or
-// created by phone) plus the Store that account owns — the phone number
-// becomes the vendor's login identity for the normal OTP endpoints.
-type ApprovePayload = {
-  contactName: string;
-  phone: string;
-  countryCode: string;
-} & Omit<Parameters<typeof StoreService.createStoreToDB>[0], 'owner' | 'name'>;
-
+// created by phone) plus the Store that account owns — every field needed
+// for both was already collected on the Join Us form, so approving takes
+// nothing but the application id.
 const approveVendorApplicationToDB = async (
   applicationId: string,
-  adminId: string,
-  payload: ApprovePayload
+  adminId: string
 ) => {
   const application = await getPendingApplication(applicationId);
-  const { contactName, phone, countryCode, ...storePayload } = payload;
+  const { contactName, phone, countryCode, ...storeFields } = application.toObject();
 
   let vendorUser = await User.findOne({ phone });
   if (vendorUser && vendorUser.role !== USER_ROLES.VENDOR) {
@@ -91,10 +85,20 @@ const approveVendorApplicationToDB = async (
   }
 
   const store = await StoreService.createStoreToDB({
-    ...(storePayload as Omit<IStore, 'owner' | 'name'>),
+    addressText: storeFields.addressText,
+    location: storeFields.location,
+    categories: storeFields.categories,
+    subCategories: storeFields.subCategories,
+    operatingHours: storeFields.operatingHours,
+    deliveryFee: storeFields.deliveryFee,
+    deliveryTimeMinutes: storeFields.deliveryTimeMinutes,
+    minOrderAmount: storeFields.minOrderAmount,
+    supportsDelivery: storeFields.supportsDelivery,
+    supportsPickup: storeFields.supportsPickup,
+    acceptsGiftCardCategories: storeFields.acceptsGiftCardCategories,
     owner: vendorUser._id,
     name: application.storeName,
-  });
+  } as IStore);
 
   application.status = 'APPROVED';
   application.reviewedBy = new Types.ObjectId(adminId);
