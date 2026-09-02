@@ -16,6 +16,9 @@ import { StoreVendorRoutes } from '../app/modules/store/store.vendor.route';
 import { SupportRoutes } from '../app/modules/support/support.route';
 import { UserRouter } from '../app/modules/user/user.route';
 import { VendorApplicationRoutes } from '../app/modules/vendorApplication/vendorApplication.route';
+import { VirtualCardAdminRoutes } from '../app/modules/virtualCard/virtualCard.admin.route';
+import { VirtualCardRoutes } from '../app/modules/virtualCard/virtualCard.route';
+import { VirtualCardVendorRoutes } from '../app/modules/virtualCard/virtualCard.vendor.route';
 import { VoucherRoutes } from '../app/modules/voucher/voucher.route';
 
 const router = express.Router();
@@ -80,6 +83,14 @@ const routes = [
     path: '/support',
     route: SupportRoutes,
   },
+  {
+    path: '/virtual-cards',
+    route: VirtualCardRoutes,
+  },
+  {
+    path: '/admin/virtual-cards',
+    route: VirtualCardAdminRoutes,
+  },
   // Vendor panel — every route below is scoped to the calling vendor's own store.
   {
     path: '/vendor/store',
@@ -92,6 +103,10 @@ const routes = [
   {
     path: '/vendor/orders',
     route: OrderVendorRoutes,
+  },
+  {
+    path: '/vendor/virtual-cards',
+    route: VirtualCardVendorRoutes,
   },
 ];
 
