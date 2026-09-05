@@ -28,6 +28,7 @@ const cartSchema = new Schema<ICart, CartModel>(
           variantSelections: {
             type: [
               {
+                _id: false,
                 groupName: { type: String, required: true },
                 optionLabel: { type: String, required: true },
                 priceModifier: { type: Number, default: 0 },

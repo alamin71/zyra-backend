@@ -84,6 +84,32 @@ const resolveVariantSelections = (
   return resolved;
 };
 
+// Compares only groupName/optionLabel/priceModifier — never raw JSON.stringify
+// on Mongoose subdocuments directly, since a saved item's variantSelections
+// carry Mongoose's own internal fields that a freshly-built plain array won't
+// have, which would make identical selections look different.
+const sameVariantSelections = (
+  a: ICartVariantSelection[],
+  b: ICartVariantSelection[]
+): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  const normalize = (selections: ICartVariantSelection[]) =>
+    selections
+      .map((s) => ({
+        groupName: s.groupName,
+        optionLabel: s.optionLabel,
+        priceModifier: s.priceModifier,
+      }))
+      .sort((x, y) => x.groupName.localeCompare(y.groupName));
+
+  return (
+    JSON.stringify(normalize(a)) === JSON.stringify(normalize(b))
+  );
+};
+
 const addItemToCart = async (
   userId: string,
   payload: {
@@ -135,7 +161,7 @@ const addItemToCart = async (
     (item) =>
       item.product.equals(product._id) &&
       item.specialRequest === payload.specialRequest &&
-      JSON.stringify(item.variantSelections) === JSON.stringify(variantSelections)
+      sameVariantSelections(item.variantSelections, variantSelections)
   );
 
   if (existingItem) {
