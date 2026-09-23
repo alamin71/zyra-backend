@@ -10,10 +10,17 @@ const router = express.Router();
 const vendor = auth(USER_ROLES.VENDOR);
 
 router.post(
-  '/redeem',
+  '/charge-requests',
   vendor,
-  validateRequest(VirtualCardValidation.redeemCodeZodSchema),
-  VirtualCardController.redeemCode
+  validateRequest(VirtualCardValidation.createChargeRequestZodSchema),
+  VirtualCardController.createChargeRequest
+);
+
+router.get(
+  '/charge-requests/:id',
+  vendor,
+  validateRequest(VirtualCardValidation.chargeRequestIdParamZodSchema),
+  VirtualCardController.getChargeRequestStatus
 );
 
 export const VirtualCardVendorRoutes = router;

@@ -1,22 +1,23 @@
 import { z } from 'zod';
 import { checkValidID } from '../../../shared/checkValidID';
 
-const loadVirtualCardZodSchema = z.object({
+const checkRecipientZodSchema = z.object({
+  body: z.object({
+    phone: z.string().trim().min(6, { message: 'A valid phone number is required' }),
+  }),
+});
+
+const sendCreditZodSchema = z.object({
   body: z.object({
     amount: z.number().positive({ message: 'Amount must be greater than 0' }),
+    recipientPhone: z
+      .string()
+      .trim()
+      .min(6, { message: 'A valid recipient phone number is required' }),
   }),
 });
 
-const cardIdParamZodSchema = z.object({
-  params: z.object({
-    id: checkValidID('Invalid virtual card id'),
-  }),
-});
-
-const giftVirtualCardZodSchema = z.object({
-  params: z.object({
-    id: checkValidID('Invalid virtual card id'),
-  }),
+const transferZodSchema = z.object({
   body: z.object({
     recipientPhone: z
       .string()
@@ -26,40 +27,64 @@ const giftVirtualCardZodSchema = z.object({
   }),
 });
 
-const giftIdParamZodSchema = z.object({
+const pendingGiftIdParamZodSchema = z.object({
   params: z.object({
     id: checkValidID('Invalid gift id'),
   }),
 });
 
-const modifyGiftZodSchema = z.object({
+const respondChargeRequestZodSchema = z.object({
   params: z.object({
-    id: checkValidID('Invalid gift id'),
+    id: checkValidID('Invalid charge request id'),
   }),
   body: z.object({
+    approve: z.boolean(),
+  }),
+});
+
+const createChargeRequestZodSchema = z.object({
+  body: z.object({
+    cardNumber: z.string().trim().min(4, { message: 'Card number is required' }),
     amount: z.number().positive({ message: 'Amount must be greater than 0' }),
   }),
 });
 
-const generateRedemptionCodeZodSchema = z.object({
+const chargeRequestIdParamZodSchema = z.object({
   params: z.object({
-    id: checkValidID('Invalid virtual card id'),
+    id: checkValidID('Invalid charge request id'),
   }),
 });
 
-const redeemCodeZodSchema = z.object({
+const updateSettingsZodSchema = z.object({
+  body: z
+    .object({
+      loadFeePercent: z.number().min(0).max(100).optional(),
+      spendFeePercent: z.number().min(0).max(100).optional(),
+      whatsappInviteMessageTemplate: z.string().trim().min(1).optional(),
+    })
+    .refine((data) => Object.keys(data).length > 0, {
+      message: 'At least one field is required',
+    }),
+});
+
+const issueCardZodSchema = z.object({
   body: z.object({
-    code: z.string().trim().length(6, { message: 'Invalid redemption code' }),
-    amount: z.number().positive({ message: 'Amount must be greater than 0' }),
+    userId: checkValidID('Invalid user id'),
+    cardNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{4,16}$/, { message: 'Card number must be 4-16 digits' }),
   }),
 });
 
 export const VirtualCardValidation = {
-  loadVirtualCardZodSchema,
-  cardIdParamZodSchema,
-  giftVirtualCardZodSchema,
-  giftIdParamZodSchema,
-  modifyGiftZodSchema,
-  generateRedemptionCodeZodSchema,
-  redeemCodeZodSchema,
+  checkRecipientZodSchema,
+  sendCreditZodSchema,
+  transferZodSchema,
+  pendingGiftIdParamZodSchema,
+  respondChargeRequestZodSchema,
+  createChargeRequestZodSchema,
+  chargeRequestIdParamZodSchema,
+  updateSettingsZodSchema,
+  issueCardZodSchema,
 };

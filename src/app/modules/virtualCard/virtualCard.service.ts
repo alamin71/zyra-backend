@@ -1,23 +1,23 @@
 import { StatusCodes } from 'http-status-codes';
 import AppError from '../../../errors/AppError';
-import { stripeHelper } from '../../../helpers/stripeHelper';
 import { smsHelper } from '../../../helpers/smsHelper';
-import generateOTP from '../../../utils/generateOTP';
+import { stripeHelper } from '../../../helpers/stripeHelper';
 import QueryBuilder from '../../builder/QueryBuilder';
-import { User } from '../user/user.model';
 import { Store } from '../store/store.model';
+import { User } from '../user/user.model';
+import { VIRTUAL_CARD_VALIDITY_MONTHS } from './virtualCard.interface';
 import {
-  PLATFORM_FEE_PERCENT,
-  VIRTUAL_CARD_VALIDITY_MONTHS,
-} from './virtualCard.interface';
-import {
+  CardNumberCounter,
   VirtualCard,
-  VirtualCardGift,
-  VirtualCardRedemption,
+  VirtualCardChargeRequest,
+  VirtualCardPendingGift,
+  VirtualCardSettings,
   VirtualCardTransaction,
 } from './virtualCard.model';
 
-const REDEMPTION_CODE_TTL_MS = 5 * 60 * 1000;
+const CHARGE_APPROVAL_TTL_MS = 3 * 60 * 1000; // client-confirmed: 3 minutes
+const CARD_NUMBER_LENGTH = 16;
+const FAMILY_RESERVED_UPTO = 10; // cards 0001-0010 reserved, auto numbering starts at 11
 
 const newExpiry = () => {
   const d = new Date();
@@ -27,7 +27,12 @@ const newExpiry = () => {
 
 const recordTransaction = async (params: {
   card: string;
-  type: 'LOAD' | 'TOP_UP' | 'GIFT_SENT' | 'GIFT_RECEIVED' | 'SPEND' | 'REFUND';
+  type:
+    | 'LOAD'
+    | 'TRANSFER_SENT'
+    | 'TRANSFER_RECEIVED'
+    | 'SPEND'
+    | 'REFUND';
   amount: number;
   balanceAfter: number;
   relatedUser?: string;
@@ -35,103 +40,101 @@ const recordTransaction = async (params: {
   note?: string;
 }) => VirtualCardTransaction.create(params);
 
-const getOwnedActiveCard = async (userId: string, cardId: string) => {
-  const card = await VirtualCard.findOne({ _id: cardId, owner: userId });
-  if (!card) {
-    throw new AppError(StatusCodes.NOT_FOUND, 'Virtual card not found');
+// ---- Settings (admin-controlled fees + WhatsApp template) ----
+
+const SETTINGS_ID = 'virtual-card-settings';
+
+const getSettings = async () => {
+  const existing = await VirtualCardSettings.findById(SETTINGS_ID);
+  if (existing) {
+    return existing;
   }
-  if (card.status !== 'ACTIVE') {
-    throw new AppError(StatusCodes.BAD_REQUEST, `Card is ${card.status.toLowerCase()}`);
-  }
-  return card;
+  return VirtualCardSettings.create({ _id: SETTINGS_ID });
 };
 
-// ---- Load / Top-up ----
+const getSettingsFromDB = async () => getSettings();
 
-const loadVirtualCardToDB = async (userId: string, amount: number) => {
-  const chargeAmount = amount * (1 + PLATFORM_FEE_PERCENT / 100);
-  const charge = await stripeHelper.chargeForLoad(chargeAmount, {
-    userId,
-    purpose: 'virtual-card-load',
-  });
+const updateSettingsToDB = async (payload: {
+  loadFeePercent?: number;
+  spendFeePercent?: number;
+  whatsappInviteMessageTemplate?: string;
+}) => {
+  await getSettings();
+  const updated = await VirtualCardSettings.findByIdAndUpdate(
+    SETTINGS_ID,
+    payload,
+    { new: true }
+  );
+  return updated;
+};
 
-  if (charge.status !== 'succeeded') {
-    return { requiresAction: true, clientSecret: charge.clientSecret };
+// ---- Card numbering ----
+
+const formatCardNumber = (raw: string) =>
+  raw.replace(/(\d{4})(?=\d)/g, '$1 ');
+
+const nextCardNumberSeq = async (): Promise<number> => {
+  let counter = await CardNumberCounter.findById('virtualCardNumber');
+  if (!counter) {
+    try {
+      counter = await CardNumberCounter.create({
+        _id: 'virtualCardNumber',
+        seq: FAMILY_RESERVED_UPTO,
+      });
+    } catch {
+      // Another request created it first — fine, just re-read below.
+    }
   }
 
-  const card = await VirtualCard.create({
+  const updated = await CardNumberCounter.findByIdAndUpdate(
+    'virtualCardNumber',
+    { $inc: { seq: 1 } },
+    { new: true, upsert: true }
+  );
+
+  return updated!.seq;
+};
+
+const generateCardNumber = async (): Promise<string> => {
+  const seq = await nextCardNumberSeq();
+  return seq.toString().padStart(CARD_NUMBER_LENGTH, '0');
+};
+
+// Every user gets exactly one permanent card, created the first time they
+// need one (their own first load, or claiming a gift). Top-ups and further
+// gifts reuse the same card/number for life.
+const getOrCreateCardForUser = async (userId: string) => {
+  let card = await VirtualCard.findOne({ owner: userId });
+  if (card) {
+    return card;
+  }
+
+  const cardNumber = await generateCardNumber();
+  card = await VirtualCard.create({
     owner: userId,
-    balance: amount,
+    cardNumber,
+    balance: 0,
     status: 'ACTIVE',
     expiresAt: newExpiry(),
   });
-
-  await recordTransaction({
-    card: card._id.toString(),
-    type: 'LOAD',
-    amount,
-    balanceAfter: card.balance,
-    note: `Stripe charge $${chargeAmount.toFixed(2)} (incl. ${PLATFORM_FEE_PERCENT}% platform fee), payment intent ${charge.paymentIntentId}`,
-  });
-
-  return { requiresAction: false, card };
-};
-
-const topUpVirtualCardToDB = async (
-  userId: string,
-  cardId: string,
-  amount: number
-) => {
-  const card = await getOwnedActiveCard(userId, cardId);
-
-  const chargeAmount = amount * (1 + PLATFORM_FEE_PERCENT / 100);
-  const charge = await stripeHelper.chargeForLoad(chargeAmount, {
-    userId,
-    cardId,
-    purpose: 'virtual-card-topup',
-  });
-
-  if (charge.status !== 'succeeded') {
-    return { requiresAction: true, clientSecret: charge.clientSecret };
-  }
-
-  card.balance += amount;
-  await card.save();
-
-  await recordTransaction({
-    card: card._id.toString(),
-    type: 'TOP_UP',
-    amount,
-    balanceAfter: card.balance,
-    note: `Stripe charge $${chargeAmount.toFixed(2)} (incl. ${PLATFORM_FEE_PERCENT}% platform fee), payment intent ${charge.paymentIntentId}`,
-  });
-
-  return { requiresAction: false, card };
+  return card;
 };
 
 // ---- Read ----
 
-const getMyVirtualCardsFromDB = async (userId: string) => {
-  return VirtualCard.find({ owner: userId }).sort('-createdAt').lean();
+const getMyCardFromDB = async (userId: string) => {
+  const card = await getOrCreateCardForUser(userId);
+  return { ...card.toObject(), formattedCardNumber: formatCardNumber(card.cardNumber) };
 };
 
-const getVirtualCardByIdFromDB = async (userId: string, cardId: string) => {
-  const card = await VirtualCard.findOne({ _id: cardId, owner: userId }).lean();
-  if (!card) {
-    throw new AppError(StatusCodes.NOT_FOUND, 'Virtual card not found');
-  }
-  return card;
-};
-
-const getCardTransactionsFromDB = async (
+const getMyTransactionsFromDB = async (
   userId: string,
-  cardId: string,
   query: Record<string, unknown>
 ) => {
-  await getVirtualCardByIdFromDB(userId, cardId);
+  const card = await getOrCreateCardForUser(userId);
 
   const txQuery = new QueryBuilder(
-    VirtualCardTransaction.find({ card: cardId }).lean(),
+    VirtualCardTransaction.find({ card: card._id }).lean(),
     { sort: '-createdAt', ...query }
   )
     .filter()
@@ -147,137 +150,90 @@ const getCardTransactionsFromDB = async (
   return { data, meta };
 };
 
-// ---- Gifting ----
+// ---- Check recipient (drives the "not registered, invite?" prompt) ----
 
-const giftVirtualCardToDB = async (
-  userId: string,
-  cardId: string,
-  recipientPhone: string,
-  amount: number
-) => {
-  const card = await getOwnedActiveCard(userId, cardId);
-
-  if (card.balance < amount) {
-    throw new AppError(StatusCodes.BAD_REQUEST, 'Insufficient card balance');
+const checkRecipientFromDB = async (phone: string) => {
+  const user = await User.findOne({ phone });
+  if (!user) {
+    return { registered: false as const };
   }
+  return { registered: true as const, name: user.name };
+};
 
-  card.balance -= amount;
-  await card.save();
+// ---- Send credit (the primary purchase flow — sender pays, recipient's
+// permanent card is credited, or a pending gift is held if unregistered) ----
 
-  await recordTransaction({
-    card: card._id.toString(),
-    type: 'GIFT_SENT',
-    amount: -amount,
-    balanceAfter: card.balance,
-    note: `Gifted to ${recipientPhone}`,
+const sendCreditToDB = async (
+  senderId: string,
+  amount: number,
+  recipientPhone: string
+) => {
+  const settings = await getSettings();
+  const chargeAmount = amount * (1 + settings.loadFeePercent / 100);
+
+  const charge = await stripeHelper.chargeForLoad(chargeAmount, {
+    senderId,
+    recipientPhone,
+    purpose: 'virtual-card-send',
   });
+
+  if (charge.status !== 'succeeded') {
+    return { requiresAction: true, clientSecret: charge.clientSecret };
+  }
 
   const recipientUser = await User.findOne({ phone: recipientPhone });
 
-  const gift = await VirtualCardGift.create({
-    sourceCard: card._id,
-    fromUser: userId,
+  if (recipientUser) {
+    const card = await getOrCreateCardForUser(recipientUser._id.toString());
+    card.balance += amount;
+    await card.save();
+
+    await recordTransaction({
+      card: card._id.toString(),
+      type: 'LOAD',
+      amount,
+      balanceAfter: card.balance,
+      relatedUser: senderId,
+      note: `Credit purchased by sender, Stripe charge $${chargeAmount.toFixed(2)} (incl. ${settings.loadFeePercent}% fee), payment intent ${charge.paymentIntentId}`,
+    });
+
+    const message = `You've received a $${amount} Zyara Prepaid Credit! Open the Zyara app to see your balance.`;
+    await smsHelper.sendWhatsAppMessage(recipientPhone, message).catch(() => undefined);
+
+    return { requiresAction: false, delivered: true, card };
+  }
+
+  // Not registered — hold the money as a pending gift and invite them.
+  const pendingGift = await VirtualCardPendingGift.create({
+    fromUser: senderId,
     toPhone: recipientPhone,
-    toUser: recipientUser?._id,
     amount,
     status: 'PENDING',
   });
 
-  const message = `You've received a $${amount} Zyara Virtual Card gift! Open the Zyara app to claim it.`;
-  if (recipientUser) {
-    // Push notification delivery is pending the Notification module — SMS/WhatsApp is the reliable channel available today.
-    await smsHelper.sendWhatsAppMessage(recipientPhone, message).catch(() => undefined);
-  } else {
-    await smsHelper
-      .sendWhatsAppMessage(
-        recipientPhone,
-        `${message} Download Zyara to get started.`
-      )
-      .catch(() => undefined);
-  }
+  const inviteMessage = settings.whatsappInviteMessageTemplate.replace(
+    '{{link}}',
+    `${process.env.BACKEND_URL || ''}/download`
+  );
+  await smsHelper.sendWhatsAppMessage(recipientPhone, inviteMessage).catch(() => undefined);
 
-  return gift;
+  return { requiresAction: false, delivered: false, pendingGift };
 };
 
-const getOwnedPendingGift = async (userId: string, giftId: string) => {
-  const gift = await VirtualCardGift.findOne({ _id: giftId, fromUser: userId });
-  if (!gift) {
-    throw new AppError(StatusCodes.NOT_FOUND, 'Gift not found');
-  }
-  if (gift.status !== 'PENDING') {
-    throw new AppError(
-      StatusCodes.BAD_REQUEST,
-      `This gift was already ${gift.status.toLowerCase()}`
-    );
-  }
-  return gift;
-};
+// ---- Pending gift claim (after the invited phone number registers) ----
 
-const modifyGiftToDB = async (
-  userId: string,
-  giftId: string,
-  newAmount: number
-) => {
-  const gift = await getOwnedPendingGift(userId, giftId);
-  const card = await VirtualCard.findById(gift.sourceCard);
-  if (!card) {
-    throw new AppError(StatusCodes.NOT_FOUND, 'Source card not found');
-  }
-
-  const difference = newAmount - gift.amount;
-  if (difference > 0 && card.balance < difference) {
-    throw new AppError(StatusCodes.BAD_REQUEST, 'Insufficient card balance');
-  }
-
-  card.balance -= difference;
-  await card.save();
-  gift.amount = newAmount;
-  await gift.save();
-
-  await recordTransaction({
-    card: card._id.toString(),
-    type: 'GIFT_SENT',
-    amount: -difference,
-    balanceAfter: card.balance,
-    note: `Adjusted gift to ${gift.toPhone} to $${newAmount}`,
-  });
-
-  return gift;
-};
-
-const cancelGiftToDB = async (userId: string, giftId: string) => {
-  const gift = await getOwnedPendingGift(userId, giftId);
-  const card = await VirtualCard.findById(gift.sourceCard);
-  if (!card) {
-    throw new AppError(StatusCodes.NOT_FOUND, 'Source card not found');
-  }
-
-  card.balance += gift.amount;
-  await card.save();
-
-  gift.status = 'CANCELLED';
-  gift.cancelledAt = new Date();
-  await gift.save();
-
-  await recordTransaction({
-    card: card._id.toString(),
-    type: 'REFUND',
-    amount: gift.amount,
-    balanceAfter: card.balance,
-    note: `Cancelled gift to ${gift.toPhone}`,
-  });
-
-  return gift;
-};
-
-const getIncomingGiftsFromDB = async (phone: string) => {
-  return VirtualCardGift.find({ toPhone: phone, status: 'PENDING' })
+const getIncomingPendingGiftsFromDB = async (phone: string) => {
+  return VirtualCardPendingGift.find({ toPhone: phone, status: 'PENDING' })
     .sort('-createdAt')
     .lean();
 };
 
-const claimGiftToDB = async (userId: string, userPhone: string, giftId: string) => {
-  const gift = await VirtualCardGift.findById(giftId);
+const claimPendingGiftToDB = async (
+  userId: string,
+  userPhone: string,
+  giftId: string
+) => {
+  const gift = await VirtualCardPendingGift.findById(giftId);
   if (!gift) {
     throw new AppError(StatusCodes.NOT_FOUND, 'Gift not found');
   }
@@ -294,67 +250,103 @@ const claimGiftToDB = async (userId: string, userPhone: string, giftId: string) 
     );
   }
 
-  const newCard = await VirtualCard.create({
-    owner: userId,
-    balance: gift.amount,
-    status: 'ACTIVE',
-    expiresAt: newExpiry(),
-  });
+  const card = await getOrCreateCardForUser(userId);
+  card.balance += gift.amount;
+  await card.save();
 
   await recordTransaction({
-    card: newCard._id.toString(),
-    type: 'GIFT_RECEIVED',
+    card: card._id.toString(),
+    type: 'LOAD',
     amount: gift.amount,
-    balanceAfter: newCard.balance,
+    balanceAfter: card.balance,
     relatedUser: gift.fromUser.toString(),
-    note: 'Claimed gift',
+    note: 'Claimed pending gift',
   });
 
   gift.status = 'CLAIMED';
-  gift.toUser = newCard.owner;
-  gift.claimedCard = newCard._id;
+  gift.claimedCard = card._id;
   gift.claimedAt = new Date();
   await gift.save();
 
-  return { gift, card: newCard };
+  return { gift, card };
 };
 
-// ---- Spend at vendor (masked/tokenized — vendor never sees the card itself) ----
+// ---- Transfer (recipient re-distributes balance they already hold, to
+// another REGISTERED user — no invite flow here per the client's deck) ----
 
-const generateRedemptionCodeToDB = async (userId: string, cardId: string) => {
-  await getOwnedActiveCard(userId, cardId);
-
-  let code = generateOTP(6);
-  // Astronomically unlikely to collide, but guard anyway since code is unique-indexed.
-  while (await VirtualCardRedemption.findOne({ code, status: 'ACTIVE' })) {
-    code = generateOTP(6);
-  }
-
-  const redemption = await VirtualCardRedemption.create({
-    card: cardId,
-    code,
-    status: 'ACTIVE',
-    expiresAt: new Date(Date.now() + REDEMPTION_CODE_TTL_MS),
-  });
-
-  return redemption;
-};
-
-const redeemCodeToDB = async (vendorUserId: string, code: string, amount: number) => {
-  const redemption = await VirtualCardRedemption.findOne({ code });
-  if (!redemption) {
-    throw new AppError(StatusCodes.NOT_FOUND, 'Invalid or expired code');
-  }
-  if (redemption.status !== 'ACTIVE' || redemption.expiresAt < new Date()) {
-    throw new AppError(StatusCodes.BAD_REQUEST, 'This code is no longer valid');
-  }
-
-  const card = await VirtualCard.findById(redemption.card);
-  if (!card || card.status !== 'ACTIVE') {
-    throw new AppError(StatusCodes.BAD_REQUEST, 'This card is not active');
+const transferBalanceToDB = async (
+  userId: string,
+  recipientPhone: string,
+  amount: number
+) => {
+  const card = await getOrCreateCardForUser(userId);
+  if (card.status !== 'ACTIVE') {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'Your card is not active');
   }
   if (card.balance < amount) {
     throw new AppError(StatusCodes.BAD_REQUEST, 'Insufficient card balance');
+  }
+
+  const recipientUser = await User.findOne({ phone: recipientPhone });
+  if (!recipientUser) {
+    throw new AppError(
+      StatusCodes.NOT_FOUND,
+      'Recipient must be a registered Zyara user to receive a transfer'
+    );
+  }
+  if (recipientUser._id.equals(userId)) {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'You cannot transfer to yourself');
+  }
+
+  const recipientCard = await getOrCreateCardForUser(recipientUser._id.toString());
+
+  card.balance -= amount;
+  await card.save();
+  recipientCard.balance += amount;
+  await recipientCard.save();
+
+  await recordTransaction({
+    card: card._id.toString(),
+    type: 'TRANSFER_SENT',
+    amount: -amount,
+    balanceAfter: card.balance,
+    relatedUser: recipientUser._id.toString(),
+    note: `Transferred to ${recipientPhone}`,
+  });
+  await recordTransaction({
+    card: recipientCard._id.toString(),
+    type: 'TRANSFER_RECEIVED',
+    amount,
+    balanceAfter: recipientCard.balance,
+    relatedUser: userId,
+    note: 'Received transfer',
+  });
+
+  const message = `You've received a $${amount} transfer on your Zyara Prepaid Credit card.`;
+  await smsHelper.sendWhatsAppMessage(recipientPhone, message).catch(() => undefined);
+
+  return card;
+};
+
+// ---- Spend: merchant creates a charge request, cardholder approves ----
+
+const createChargeRequestToDB = async (
+  vendorUserId: string,
+  cardNumberInput: string,
+  amount: number
+) => {
+  const cardNumber = cardNumberInput.replace(/\s+/g, '');
+  const card = await VirtualCard.findOne({ cardNumber });
+  if (!card) {
+    throw new AppError(StatusCodes.NOT_FOUND, 'Card not found');
+  }
+  if (card.status !== 'ACTIVE') {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'This card is not active');
+  }
+  // Validated server-side only — the merchant response never includes the
+  // actual balance, per the client's privacy requirement.
+  if (card.balance < amount) {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'This card cannot cover the requested amount');
   }
 
   const store = await Store.findOne({ owner: vendorUserId });
@@ -362,30 +354,151 @@ const redeemCodeToDB = async (vendorUserId: string, code: string, amount: number
     throw new AppError(StatusCodes.NOT_FOUND, "You don't have a store");
   }
 
-  card.balance -= amount;
+  const request = await VirtualCardChargeRequest.create({
+    card: card._id,
+    store: store._id,
+    amount,
+    status: 'PENDING',
+    expiresAt: new Date(Date.now() + CHARGE_APPROVAL_TTL_MS),
+  });
+
+  const owner = await User.findById(card.owner);
+  if (owner?.phone) {
+    await smsHelper
+      .sendWhatsAppMessage(
+        owner.phone,
+        `${store.name} is requesting a charge of $${amount} on your Zyara Prepaid Credit card. Open the app to approve or decline (expires in 3 minutes).`
+      )
+      .catch(() => undefined);
+  }
+
+  return { requestId: request._id, status: request.status, expiresAt: request.expiresAt };
+};
+
+const expireIfPastDue = async (
+  request: InstanceType<typeof VirtualCardChargeRequest>
+) => {
+  if (request.status === 'PENDING' && request.expiresAt < new Date()) {
+    request.status = 'EXPIRED';
+    request.respondedAt = new Date();
+    await request.save();
+  }
+  return request;
+};
+
+// Merchant polls this — deliberately never returns the card's balance.
+const getChargeRequestStatusFromDB = async (
+  vendorUserId: string,
+  requestId: string
+) => {
+  const store = await Store.findOne({ owner: vendorUserId });
+  if (!store) {
+    throw new AppError(StatusCodes.NOT_FOUND, "You don't have a store");
+  }
+
+  let request = await VirtualCardChargeRequest.findOne({
+    _id: requestId,
+    store: store._id,
+  });
+  if (!request) {
+    throw new AppError(StatusCodes.NOT_FOUND, 'Charge request not found');
+  }
+
+  request = await expireIfPastDue(request);
+
+  return {
+    requestId: request._id,
+    status: request.status,
+    amount: request.amount,
+    expiresAt: request.expiresAt,
+  };
+};
+
+const getPendingChargeRequestsFromDB = async (userId: string) => {
+  const card = await getOrCreateCardForUser(userId);
+
+  const requests = await VirtualCardChargeRequest.find({
+    card: card._id,
+    status: 'PENDING',
+  })
+    .populate('store', 'name logo')
+    .sort('-createdAt');
+
+  const stillPending = [];
+  for (const request of requests) {
+    const updated = await expireIfPastDue(request);
+    if (updated.status === 'PENDING') {
+      stillPending.push(updated);
+    }
+  }
+  return stillPending;
+};
+
+const respondToChargeRequestToDB = async (
+  userId: string,
+  requestId: string,
+  approve: boolean
+) => {
+  const card = await getOrCreateCardForUser(userId);
+
+  let request = await VirtualCardChargeRequest.findOne({
+    _id: requestId,
+    card: card._id,
+  });
+  if (!request) {
+    throw new AppError(StatusCodes.NOT_FOUND, 'Charge request not found');
+  }
+
+  request = await expireIfPastDue(request);
+  if (request.status !== 'PENDING') {
+    throw new AppError(
+      StatusCodes.BAD_REQUEST,
+      `This request already ${request.status.toLowerCase()}`
+    );
+  }
+
+  if (!approve) {
+    request.status = 'DECLINED';
+    request.respondedAt = new Date();
+    await request.save();
+    return request;
+  }
+
+  if (card.status !== 'ACTIVE') {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'Your card is not active');
+  }
+  if (card.balance < request.amount) {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'Insufficient card balance');
+  }
+
+  const settings = await getSettings();
+  // The fee comes out of the merchant's payout, not the cardholder's
+  // balance — the client's deck shows the remaining balance as
+  // starting − purchase only, with the fee called out separately.
+  const merchantPayout = request.amount * (1 - settings.spendFeePercent / 100);
+
+  card.balance -= request.amount;
   await card.save();
 
-  redemption.status = 'USED';
-  redemption.usedAt = new Date();
-  redemption.usedAmount = amount;
-  redemption.store = store._id;
-  await redemption.save();
+  request.status = 'APPROVED';
+  request.respondedAt = new Date();
+  await request.save();
 
   await recordTransaction({
     card: card._id.toString(),
     type: 'SPEND',
-    amount: -amount,
+    amount: -request.amount,
     balanceAfter: card.balance,
-    store: store._id.toString(),
-    note: `Spent at ${store.name}`,
+    store: request.store.toString(),
+    note: `Approved purchase — merchant paid out $${merchantPayout.toFixed(2)} after ${settings.spendFeePercent}% fee`,
   });
 
-  return { charged: amount, remainingBalance: card.balance, store: store.name };
+  return request;
 };
 
 // ---- Admin ----
 
-const getAllVirtualCardsFromDB = async (query: Record<string, unknown>) => {
+const getAllCardsFromDB = async (query: Record<string, unknown>) => {
   const cardQuery = new QueryBuilder(VirtualCard.find().lean(), {
     sort: '-createdAt',
     ...query,
@@ -403,11 +516,36 @@ const getAllVirtualCardsFromDB = async (query: Record<string, unknown>) => {
   return { data, meta };
 };
 
-// No automatic Stripe refund here — a card's balance can come from a load,
-// several top-ups, or a claimed gift (which was never itself charged), so
-// there's no single payment to cleanly refund via the API. This flags
-// expired cards and zeroes them out; actual money-back to the user is a
-// manual finance step until the client defines a real refund mechanism.
+// One-time manual issuance for the client's own first 10 (family) cards,
+// bypassing the auto-counter so specific low numbers can be assigned.
+const issueCardToDB = async (userId: string, cardNumberInput: string) => {
+  const existing = await VirtualCard.findOne({ owner: userId });
+  if (existing) {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'This user already has a card');
+  }
+
+  const cardNumber = cardNumberInput
+    .replace(/\s+/g, '')
+    .padStart(CARD_NUMBER_LENGTH, '0');
+
+  const clash = await VirtualCard.findOne({ cardNumber });
+  if (clash) {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'This card number is already in use');
+  }
+
+  return VirtualCard.create({
+    owner: userId,
+    cardNumber,
+    balance: 0,
+    status: 'ACTIVE',
+    expiresAt: newExpiry(),
+  });
+};
+
+// No automatic Stripe refund — a card's balance can come from a load, a
+// transfer, or a claimed gift, so there's no single payment to cleanly
+// refund. This flags expired balances and zeroes them; the card itself
+// (and its number) stays active for future top-ups.
 const processExpiredCardsToDB = async () => {
   const expiredCards = await VirtualCard.find({
     status: 'ACTIVE',
@@ -419,7 +557,6 @@ const processExpiredCardsToDB = async () => {
   for (const card of expiredCards) {
     const refundAmount = card.balance;
     card.balance = 0;
-    card.status = 'EXPIRED';
     await card.save();
 
     await recordTransaction({
@@ -437,18 +574,20 @@ const processExpiredCardsToDB = async () => {
 };
 
 export const VirtualCardService = {
-  loadVirtualCardToDB,
-  topUpVirtualCardToDB,
-  getMyVirtualCardsFromDB,
-  getVirtualCardByIdFromDB,
-  getCardTransactionsFromDB,
-  giftVirtualCardToDB,
-  modifyGiftToDB,
-  cancelGiftToDB,
-  getIncomingGiftsFromDB,
-  claimGiftToDB,
-  generateRedemptionCodeToDB,
-  redeemCodeToDB,
-  getAllVirtualCardsFromDB,
+  getSettingsFromDB,
+  updateSettingsToDB,
+  getMyCardFromDB,
+  getMyTransactionsFromDB,
+  checkRecipientFromDB,
+  sendCreditToDB,
+  getIncomingPendingGiftsFromDB,
+  claimPendingGiftToDB,
+  transferBalanceToDB,
+  createChargeRequestToDB,
+  getChargeRequestStatusFromDB,
+  getPendingChargeRequestsFromDB,
+  respondToChargeRequestToDB,
+  getAllCardsFromDB,
+  issueCardToDB,
   processExpiredCardsToDB,
 };

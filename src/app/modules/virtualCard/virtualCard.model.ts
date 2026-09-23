@@ -1,34 +1,38 @@
 import { model, Schema } from 'mongoose';
 import {
+  CHARGE_REQUEST_STATUS,
+  CardNumberCounterModel,
+  ICardNumberCounter,
   IVirtualCard,
-  IVirtualCardGift,
-  IVirtualCardRedemption,
+  IVirtualCardChargeRequest,
+  IVirtualCardPendingGift,
+  IVirtualCardSettings,
   IVirtualCardTransaction,
-  VIRTUAL_CARD_GIFT_STATUS,
-  VIRTUAL_CARD_REDEMPTION_STATUS,
+  PENDING_GIFT_STATUS,
   VIRTUAL_CARD_STATUS,
   VIRTUAL_CARD_TX_TYPES,
-  VirtualCardGiftModel,
+  VirtualCardChargeRequestModel,
   VirtualCardModel,
-  VirtualCardRedemptionModel,
+  VirtualCardPendingGiftModel,
+  VirtualCardSettingsModel,
   VirtualCardTransactionModel,
 } from './virtualCard.interface';
 
 const virtualCardSchema = new Schema<IVirtualCard, VirtualCardModel>(
   {
-    owner: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    balance: { type: Number, required: true, min: 0 },
-    status: {
-      type: String,
-      enum: VIRTUAL_CARD_STATUS,
-      default: 'ACTIVE',
+    owner: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      unique: true,
     },
+    cardNumber: { type: String, required: true, unique: true },
+    balance: { type: Number, required: true, min: 0, default: 0 },
+    status: { type: String, enum: VIRTUAL_CARD_STATUS, default: 'ACTIVE' },
     expiresAt: { type: Date, required: true },
   },
   { timestamps: true }
 );
-
-virtualCardSchema.index({ owner: 1, status: 1 });
 
 export const VirtualCard = model<IVirtualCard, VirtualCardModel>(
   'VirtualCard',
@@ -58,25 +62,15 @@ export const VirtualCardTransaction = model<
   VirtualCardTransactionModel
 >('VirtualCardTransaction', virtualCardTransactionSchema);
 
-const virtualCardGiftSchema = new Schema<
-  IVirtualCardGift,
-  VirtualCardGiftModel
+const virtualCardPendingGiftSchema = new Schema<
+  IVirtualCardPendingGift,
+  VirtualCardPendingGiftModel
 >(
   {
-    sourceCard: {
-      type: Schema.Types.ObjectId,
-      ref: 'VirtualCard',
-      required: true,
-    },
     fromUser: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     toPhone: { type: String, required: true, trim: true },
-    toUser: { type: Schema.Types.ObjectId, ref: 'User' },
     amount: { type: Number, required: true, min: 0.01 },
-    status: {
-      type: String,
-      enum: VIRTUAL_CARD_GIFT_STATUS,
-      default: 'PENDING',
-    },
+    status: { type: String, enum: PENDING_GIFT_STATUS, default: 'PENDING' },
     claimedCard: { type: Schema.Types.ObjectId, ref: 'VirtualCard' },
     claimedAt: { type: Date },
     cancelledAt: { type: Date },
@@ -84,35 +78,69 @@ const virtualCardGiftSchema = new Schema<
   { timestamps: true }
 );
 
-virtualCardGiftSchema.index({ toPhone: 1, status: 1 });
-virtualCardGiftSchema.index({ fromUser: 1 });
+virtualCardPendingGiftSchema.index({ toPhone: 1, status: 1 });
 
-export const VirtualCardGift = model<IVirtualCardGift, VirtualCardGiftModel>(
-  'VirtualCardGift',
-  virtualCardGiftSchema
-);
+export const VirtualCardPendingGift = model<
+  IVirtualCardPendingGift,
+  VirtualCardPendingGiftModel
+>('VirtualCardPendingGift', virtualCardPendingGiftSchema);
 
-const virtualCardRedemptionSchema = new Schema<
-  IVirtualCardRedemption,
-  VirtualCardRedemptionModel
+const virtualCardChargeRequestSchema = new Schema<
+  IVirtualCardChargeRequest,
+  VirtualCardChargeRequestModel
 >(
   {
     card: { type: Schema.Types.ObjectId, ref: 'VirtualCard', required: true },
-    code: { type: String, required: true, unique: true },
-    status: {
-      type: String,
-      enum: VIRTUAL_CARD_REDEMPTION_STATUS,
-      default: 'ACTIVE',
-    },
+    store: { type: Schema.Types.ObjectId, ref: 'Store', required: true },
+    amount: { type: Number, required: true, min: 0.01 },
+    status: { type: String, enum: CHARGE_REQUEST_STATUS, default: 'PENDING' },
     expiresAt: { type: Date, required: true },
-    usedAt: { type: Date },
-    usedAmount: { type: Number },
-    store: { type: Schema.Types.ObjectId, ref: 'Store' },
+    respondedAt: { type: Date },
   },
   { timestamps: true }
 );
 
-export const VirtualCardRedemption = model<
-  IVirtualCardRedemption,
-  VirtualCardRedemptionModel
->('VirtualCardRedemption', virtualCardRedemptionSchema);
+virtualCardChargeRequestSchema.index({ card: 1, status: 1 });
+
+export const VirtualCardChargeRequest = model<
+  IVirtualCardChargeRequest,
+  VirtualCardChargeRequestModel
+>('VirtualCardChargeRequest', virtualCardChargeRequestSchema);
+
+const DEFAULT_WHATSAPP_TEMPLATE =
+  "You've received a Zyara Prepaid Credit gift! Download the Zyara app and sign up with this number to claim it: {{link}}";
+
+const virtualCardSettingsSchema = new Schema<
+  IVirtualCardSettings,
+  VirtualCardSettingsModel
+>(
+  {
+    _id: { type: String, required: true },
+    loadFeePercent: { type: Number, required: true, default: 5 },
+    spendFeePercent: { type: Number, required: true, default: 2.5 },
+    whatsappInviteMessageTemplate: {
+      type: String,
+      required: true,
+      default: DEFAULT_WHATSAPP_TEMPLATE,
+    },
+  },
+  { timestamps: true }
+);
+
+export const VirtualCardSettings = model<
+  IVirtualCardSettings,
+  VirtualCardSettingsModel
+>('VirtualCardSettings', virtualCardSettingsSchema);
+
+const cardNumberCounterSchema = new Schema<
+  ICardNumberCounter,
+  CardNumberCounterModel
+>({
+  _id: { type: String, required: true },
+  seq: { type: Number, required: true, default: 0 },
+});
+
+export const CardNumberCounter = model<
+  ICardNumberCounter,
+  CardNumberCounterModel
+>('CardNumberCounter', cardNumberCounterSchema);
