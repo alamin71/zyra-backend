@@ -1,5 +1,6 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import { Request } from 'express';
 import fs from 'fs';
 import path from 'path';
 import config from '../config';
@@ -74,7 +75,16 @@ export const uploadMultipleToS3 = async (
   return await Promise.all(uploadPromises);
 };
 
+// s3FileUploadHandler (multer) puts uploaded files on req.files as a
+// fieldname-keyed map — this shared cast/lookup was duplicated identically
+// in product.controller.ts and store.controller.ts.
+export const getUploadedFiles = (
+  req: Request
+): { [fieldname: string]: Express.Multer.File[] } | undefined =>
+  req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+
 export const s3Helper = {
   uploadToS3,
   uploadMultipleToS3,
+  getUploadedFiles,
 };

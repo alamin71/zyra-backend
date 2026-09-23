@@ -1,6 +1,6 @@
 import { Request } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import { uploadToS3 } from '../../../helpers/s3Helper';
+import { getUploadedFiles, uploadToS3 } from '../../../helpers/s3Helper';
 import catchAsync from '../../../shared/catchAsync';
 import { resolveParam } from '../../../shared/resolveParam';
 import sendResponse from '../../../shared/sendResponse';
@@ -13,9 +13,7 @@ const applyLogoBannerUploads = async (
   req: Request,
   payload: Record<string, unknown>
 ) => {
-  const files = req.files as
-    | { [fieldname: string]: Express.Multer.File[] }
-    | undefined;
+  const files = getUploadedFiles(req);
 
   const logoFile = files?.logo?.[0];
   if (logoFile) {
