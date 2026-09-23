@@ -104,20 +104,33 @@ const generateCardNumber = async (): Promise<string> => {
 // need one (their own first load, or claiming a gift). Top-ups and further
 // gifts reuse the same card/number for life.
 const getOrCreateCardForUser = async (userId: string) => {
-  let card = await VirtualCard.findOne({ owner: userId });
+  const card = await VirtualCard.findOne({ owner: userId });
   if (card) {
     return card;
   }
 
   const cardNumber = await generateCardNumber();
-  card = await VirtualCard.create({
-    owner: userId,
-    cardNumber,
-    balance: 0,
-    status: 'ACTIVE',
-    expiresAt: newExpiry(),
-  });
-  return card;
+  try {
+    return await VirtualCard.create({
+      owner: userId,
+      cardNumber,
+      balance: 0,
+      status: 'ACTIVE',
+      expiresAt: newExpiry(),
+    });
+  } catch (err) {
+    // Two concurrent first-time requests (e.g. the app firing GET /me and
+    // GET /me/transactions together) can both reach here before either
+    // insert commits — the `owner` unique index rejects the loser, so
+    // re-fetch instead of crashing.
+    if ((err as { code?: number }).code === 11000) {
+      const existing = await VirtualCard.findOne({ owner: userId });
+      if (existing) {
+        return existing;
+      }
+    }
+    throw err;
+  }
 };
 
 // ---- Read ----
@@ -185,14 +198,20 @@ const sendCreditToDB = async (
 
   if (recipientUser) {
     const card = await getOrCreateCardForUser(recipientUser._id.toString());
-    card.balance += amount;
-    await card.save();
+    // $inc is atomic per-document, so two sends landing on the same
+    // recipient at once can't lose one of the credits the way a
+    // read-modify-write (card.balance += amount; card.save()) would.
+    const credited = await VirtualCard.findOneAndUpdate(
+      { _id: card._id },
+      { $inc: { balance: amount } },
+      { new: true }
+    );
 
     await recordTransaction({
       card: card._id.toString(),
       type: 'LOAD',
       amount,
-      balanceAfter: card.balance,
+      balanceAfter: credited!.balance,
       relatedUser: senderId,
       note: `Credit purchased by sender, Stripe charge $${chargeAmount.toFixed(2)} (incl. ${settings.loadFeePercent}% fee), payment intent ${charge.paymentIntentId}`,
     });
@@ -200,7 +219,7 @@ const sendCreditToDB = async (
     const message = `You've received a $${amount} Zyara Prepaid Credit! Open the Zyara app to see your balance.`;
     await smsHelper.sendWhatsAppMessage(recipientPhone, message).catch(() => undefined);
 
-    return { requiresAction: false, delivered: true, card };
+    return { requiresAction: false, delivered: true, card: credited };
   }
 
   // Not registered — hold the money as a pending gift and invite them.
@@ -237,12 +256,6 @@ const claimPendingGiftToDB = async (
   if (!gift) {
     throw new AppError(StatusCodes.NOT_FOUND, 'Gift not found');
   }
-  if (gift.status !== 'PENDING') {
-    throw new AppError(
-      StatusCodes.BAD_REQUEST,
-      `This gift was already ${gift.status.toLowerCase()}`
-    );
-  }
   if (gift.toPhone !== userPhone) {
     throw new AppError(
       StatusCodes.FORBIDDEN,
@@ -251,24 +264,37 @@ const claimPendingGiftToDB = async (
   }
 
   const card = await getOrCreateCardForUser(userId);
-  card.balance += gift.amount;
-  await card.save();
+
+  // Atomic claim: only one of two near-simultaneous "claim" taps can flip
+  // this from PENDING to CLAIMED, so the card only ever gets credited once.
+  const claimed = await VirtualCardPendingGift.findOneAndUpdate(
+    { _id: giftId, status: 'PENDING' },
+    { status: 'CLAIMED', claimedCard: card._id, claimedAt: new Date() },
+    { new: true }
+  );
+  if (!claimed) {
+    throw new AppError(
+      StatusCodes.BAD_REQUEST,
+      `This gift was already ${gift.status.toLowerCase()}`
+    );
+  }
+
+  const updatedCard = await VirtualCard.findOneAndUpdate(
+    { _id: card._id },
+    { $inc: { balance: gift.amount } },
+    { new: true }
+  );
 
   await recordTransaction({
     card: card._id.toString(),
     type: 'LOAD',
     amount: gift.amount,
-    balanceAfter: card.balance,
+    balanceAfter: updatedCard!.balance,
     relatedUser: gift.fromUser.toString(),
     note: 'Claimed pending gift',
   });
 
-  gift.status = 'CLAIMED';
-  gift.claimedCard = card._id;
-  gift.claimedAt = new Date();
-  await gift.save();
-
-  return { gift, card };
+  return { gift: claimed, card: updatedCard };
 };
 
 // ---- Transfer (recipient re-distributes balance they already hold, to
@@ -282,9 +308,6 @@ const transferBalanceToDB = async (
   const card = await getOrCreateCardForUser(userId);
   if (card.status !== 'ACTIVE') {
     throw new AppError(StatusCodes.BAD_REQUEST, 'Your card is not active');
-  }
-  if (card.balance < amount) {
-    throw new AppError(StatusCodes.BAD_REQUEST, 'Insufficient card balance');
   }
 
   const recipientUser = await User.findOne({ phone: recipientPhone });
@@ -300,24 +323,37 @@ const transferBalanceToDB = async (
 
   const recipientCard = await getOrCreateCardForUser(recipientUser._id.toString());
 
-  card.balance -= amount;
-  await card.save();
-  recipientCard.balance += amount;
-  await recipientCard.save();
+  // Atomic debit: balance check + deduction in one operation, so two
+  // concurrent transfers/spends off the same card can't both pass a stale
+  // balance check.
+  const debited = await VirtualCard.findOneAndUpdate(
+    { _id: card._id, status: 'ACTIVE', balance: { $gte: amount } },
+    { $inc: { balance: -amount } },
+    { new: true }
+  );
+  if (!debited) {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'Insufficient card balance');
+  }
+
+  const credited = await VirtualCard.findOneAndUpdate(
+    { _id: recipientCard._id },
+    { $inc: { balance: amount } },
+    { new: true }
+  );
 
   await recordTransaction({
-    card: card._id.toString(),
+    card: debited._id.toString(),
     type: 'TRANSFER_SENT',
     amount: -amount,
-    balanceAfter: card.balance,
+    balanceAfter: debited.balance,
     relatedUser: recipientUser._id.toString(),
     note: `Transferred to ${recipientPhone}`,
   });
   await recordTransaction({
-    card: recipientCard._id.toString(),
+    card: credited!._id.toString(),
     type: 'TRANSFER_RECEIVED',
     amount,
-    balanceAfter: recipientCard.balance,
+    balanceAfter: credited!.balance,
     relatedUser: userId,
     note: 'Received transfer',
   });
@@ -325,7 +361,7 @@ const transferBalanceToDB = async (
   const message = `You've received a $${amount} transfer on your Zyara Prepaid Credit card.`;
   await smsHelper.sendWhatsAppMessage(recipientPhone, message).catch(() => undefined);
 
-  return card;
+  return debited;
 };
 
 // ---- Spend: merchant creates a charge request, cardholder approves ----
@@ -441,7 +477,7 @@ const respondToChargeRequestToDB = async (
 ) => {
   const card = await getOrCreateCardForUser(userId);
 
-  let request = await VirtualCardChargeRequest.findOne({
+  const request = await VirtualCardChargeRequest.findOne({
     _id: requestId,
     card: card._id,
   });
@@ -449,26 +485,28 @@ const respondToChargeRequestToDB = async (
     throw new AppError(StatusCodes.NOT_FOUND, 'Charge request not found');
   }
 
-  request = await expireIfPastDue(request);
-  if (request.status !== 'PENDING') {
-    throw new AppError(
-      StatusCodes.BAD_REQUEST,
-      `This request already ${request.status.toLowerCase()}`
-    );
-  }
+  await expireIfPastDue(request);
 
   if (!approve) {
-    request.status = 'DECLINED';
-    request.respondedAt = new Date();
-    await request.save();
-    return request;
+    // Atomic claim: only succeeds if the request is still PENDING at the
+    // moment of update, so two near-simultaneous responses (or a response
+    // racing the 3-minute expiry) can't both go through.
+    const declined = await VirtualCardChargeRequest.findOneAndUpdate(
+      { _id: requestId, card: card._id, status: 'PENDING' },
+      { status: 'DECLINED', respondedAt: new Date() },
+      { new: true }
+    );
+    if (!declined) {
+      throw new AppError(
+        StatusCodes.BAD_REQUEST,
+        `This request already ${request.status.toLowerCase()}`
+      );
+    }
+    return declined;
   }
 
   if (card.status !== 'ACTIVE') {
     throw new AppError(StatusCodes.BAD_REQUEST, 'Your card is not active');
-  }
-  if (card.balance < request.amount) {
-    throw new AppError(StatusCodes.BAD_REQUEST, 'Insufficient card balance');
   }
 
   const settings = await getSettings();
@@ -477,23 +515,46 @@ const respondToChargeRequestToDB = async (
   // starting − purchase only, with the fee called out separately.
   const merchantPayout = request.amount * (1 - settings.spendFeePercent / 100);
 
-  card.balance -= request.amount;
-  await card.save();
+  // Atomic debit: the balance check and the deduction happen in one
+  // operation, so two concurrent approvals against the same card can't
+  // both pass a stale balance check and over-spend it.
+  const debited = await VirtualCard.findOneAndUpdate(
+    { _id: card._id, status: 'ACTIVE', balance: { $gte: request.amount } },
+    { $inc: { balance: -request.amount } },
+    { new: true }
+  );
+  if (!debited) {
+    throw new AppError(StatusCodes.BAD_REQUEST, 'Insufficient card balance');
+  }
 
-  request.status = 'APPROVED';
-  request.respondedAt = new Date();
-  await request.save();
+  const approved = await VirtualCardChargeRequest.findOneAndUpdate(
+    { _id: requestId, card: card._id, status: 'PENDING' },
+    { status: 'APPROVED', respondedAt: new Date() },
+    { new: true }
+  );
+  if (!approved) {
+    // Lost the race to another response after we'd already debited —
+    // refund immediately since this response doesn't count.
+    await VirtualCard.updateOne(
+      { _id: card._id },
+      { $inc: { balance: request.amount } }
+    );
+    throw new AppError(
+      StatusCodes.BAD_REQUEST,
+      'This request was already responded to'
+    );
+  }
 
   await recordTransaction({
     card: card._id.toString(),
     type: 'SPEND',
     amount: -request.amount,
-    balanceAfter: card.balance,
+    balanceAfter: debited.balance,
     store: request.store.toString(),
     note: `Approved purchase — merchant paid out $${merchantPayout.toFixed(2)} after ${settings.spendFeePercent}% fee`,
   });
 
-  return request;
+  return approved;
 };
 
 // ---- Admin ----
@@ -531,6 +592,18 @@ const issueCardToDB = async (userId: string, cardNumberInput: string) => {
   const clash = await VirtualCard.findOne({ cardNumber });
   if (clash) {
     throw new AppError(StatusCodes.BAD_REQUEST, 'This card number is already in use');
+  }
+
+  // If admin ever issues a number at or above the auto-counter's current
+  // value, bump the counter to match so a future auto-assigned card can't
+  // later collide with this manually-issued one.
+  const seq = parseInt(cardNumber, 10);
+  if (!Number.isNaN(seq)) {
+    await CardNumberCounter.findOneAndUpdate(
+      { _id: 'virtualCardNumber' },
+      { $max: { seq } },
+      { upsert: true }
+    );
   }
 
   return VirtualCard.create({
