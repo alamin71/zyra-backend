@@ -48,6 +48,10 @@ export type IStore = {
   isActive: boolean;
   isFeatured: boolean;
   acceptsGiftCardCategories: GiftCardCategory[];
+  // Vendor-declared: whether this store accepts the Zyara Prepaid Credit
+  // Card as a payment method — drives the "where can I use my card?"
+  // listing in the customer app.
+  acceptsZyaraCard: boolean;
 };
 
 export type StoreModel = Model<IStore>;

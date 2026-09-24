@@ -116,6 +116,10 @@ const storeSchema = new Schema<IStore, StoreModel>(
       type: [{ type: String, enum: GIFT_CARD_CATEGORIES }],
       default: [],
     },
+    acceptsZyaraCard: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

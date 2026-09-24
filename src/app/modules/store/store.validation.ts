@@ -37,6 +37,7 @@ const createStoreZodSchema = z.object({
     supportsDelivery: z.boolean().optional(),
     supportsPickup: z.boolean().optional(),
     acceptsGiftCardCategories: z.array(z.enum(GIFT_CARD_CATEGORIES)).optional(),
+    acceptsZyaraCard: z.boolean().optional(),
   }),
 });
 
@@ -59,6 +60,7 @@ const updateStoreZodSchema = z.object({
     supportsPickup: z.boolean().optional(),
     manualStatus: z.enum(['OPEN', 'CLOSED', 'OFFLINE']).optional(),
     acceptsGiftCardCategories: z.array(z.enum(GIFT_CARD_CATEGORIES)).optional(),
+    acceptsZyaraCard: z.boolean().optional(),
   }),
 });
 

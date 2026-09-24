@@ -1,6 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
 import AppError from '../../../errors/AppError';
 import { smsHelper } from '../../../helpers/smsHelper';
+import { socketHelper } from '../../../helpers/socketHelper';
 import { stripeHelper } from '../../../helpers/stripeHelper';
 import QueryBuilder from '../../builder/QueryBuilder';
 import { Store } from '../store/store.model';
@@ -39,6 +40,14 @@ const recordTransaction = async (params: {
   store?: string;
   note?: string;
 }) => VirtualCardTransaction.create(params);
+
+// Live-pushes the new balance to the cardholder so the app can update the
+// card on screen without the user having to pull-to-refresh.
+const pushBalanceUpdate = (ownerId: string, balance: number) => {
+  socketHelper.emitToUser(ownerId.toString(), 'virtual-card:balance-updated', {
+    balance,
+  });
+};
 
 // ---- Settings (admin-controlled fees + WhatsApp template) ----
 
@@ -137,7 +146,12 @@ const getOrCreateCardForUser = async (userId: string) => {
 
 const getMyCardFromDB = async (userId: string) => {
   const card = await getOrCreateCardForUser(userId);
-  return { ...card.toObject(), formattedCardNumber: formatCardNumber(card.cardNumber) };
+  const owner = await User.findById(userId).select('name');
+  return {
+    ...card.toObject(),
+    formattedCardNumber: formatCardNumber(card.cardNumber),
+    holderName: owner?.name,
+  };
 };
 
 const getMyTransactionsFromDB = async (
@@ -215,6 +229,7 @@ const sendCreditToDB = async (
       relatedUser: senderId,
       note: `Credit purchased by sender, Stripe charge $${chargeAmount.toFixed(2)} (incl. ${settings.loadFeePercent}% fee), payment intent ${charge.paymentIntentId}`,
     });
+    pushBalanceUpdate(recipientUser._id.toString(), credited!.balance);
 
     const message = `You've received a $${amount} Zyara Prepaid Credit! Open the Zyara app to see your balance.`;
     await smsHelper.sendWhatsAppMessage(recipientPhone, message).catch(() => undefined);
@@ -293,6 +308,7 @@ const claimPendingGiftToDB = async (
     relatedUser: gift.fromUser.toString(),
     note: 'Claimed pending gift',
   });
+  pushBalanceUpdate(userId, updatedCard!.balance);
 
   return { gift: claimed, card: updatedCard };
 };
@@ -357,6 +373,8 @@ const transferBalanceToDB = async (
     relatedUser: userId,
     note: 'Received transfer',
   });
+  pushBalanceUpdate(userId, debited.balance);
+  pushBalanceUpdate(recipientUser._id.toString(), credited!.balance);
 
   const message = `You've received a $${amount} transfer on your Zyara Prepaid Credit card.`;
   await smsHelper.sendWhatsAppMessage(recipientPhone, message).catch(() => undefined);
@@ -535,10 +553,12 @@ const respondToChargeRequestToDB = async (
   if (!approved) {
     // Lost the race to another response after we'd already debited —
     // refund immediately since this response doesn't count.
-    await VirtualCard.updateOne(
+    const refunded = await VirtualCard.findOneAndUpdate(
       { _id: card._id },
-      { $inc: { balance: request.amount } }
+      { $inc: { balance: request.amount } },
+      { new: true }
     );
+    pushBalanceUpdate(userId, refunded!.balance);
     throw new AppError(
       StatusCodes.BAD_REQUEST,
       'This request was already responded to'
@@ -553,6 +573,7 @@ const respondToChargeRequestToDB = async (
     store: request.store.toString(),
     note: `Approved purchase — merchant paid out $${merchantPayout.toFixed(2)} after ${settings.spendFeePercent}% fee`,
   });
+  pushBalanceUpdate(userId, debited.balance);
 
   return approved;
 };
@@ -560,10 +581,10 @@ const respondToChargeRequestToDB = async (
 // ---- Admin ----
 
 const getAllCardsFromDB = async (query: Record<string, unknown>) => {
-  const cardQuery = new QueryBuilder(VirtualCard.find().lean(), {
-    sort: '-createdAt',
-    ...query,
-  })
+  const cardQuery = new QueryBuilder(
+    VirtualCard.find().populate('owner', 'name phone').lean(),
+    { sort: '-createdAt', ...query }
+  )
     .filter()
     .sort()
     .paginate()
@@ -639,6 +660,7 @@ const processExpiredCardsToDB = async () => {
       balanceAfter: 0,
       note: 'Expired — flagged for manual refund processing',
     });
+    pushBalanceUpdate(card.owner.toString(), 0);
 
     results.push({ cardId: card._id, owner: card.owner, refundAmount });
   }

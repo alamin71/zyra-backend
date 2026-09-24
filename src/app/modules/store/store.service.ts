@@ -5,7 +5,7 @@ import { IStore } from './store.interface';
 import { Store } from './store.model';
 
 const PUBLIC_LIST_FIELDS =
-  'name logo banner categories subCategories addressText location deliveryFee deliveryTimeMinutes minOrderAmount supportsDelivery supportsPickup manualStatus rating isFeatured';
+  'name logo banner categories subCategories addressText location deliveryFee deliveryTimeMinutes minOrderAmount supportsDelivery supportsPickup manualStatus rating isFeatured acceptsZyaraCard';
 
 const createStoreToDB = async (payload: IStore) => {
   return Store.create(payload);
